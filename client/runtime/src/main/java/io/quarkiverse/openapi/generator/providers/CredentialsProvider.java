@@ -2,11 +2,14 @@ package io.quarkiverse.openapi.generator.providers;
 
 import jakarta.ws.rs.client.ClientRequestContext;
 
+import io.quarkus.arc.Unremovable;
+
 /**
  * Provider for security credentials. Clients can implement this interface to control how to provide security credentials in
  * runtime.
  * Annotate your bean with @RequestScope (or @Dependant) and @Priority(1).
  */
+@Unremovable
 public interface CredentialsProvider {
 
     /**

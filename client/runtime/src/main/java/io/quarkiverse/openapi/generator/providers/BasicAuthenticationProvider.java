@@ -22,16 +22,12 @@ public class BasicAuthenticationProvider extends AbstractAuthProvider {
         super(name, openApiSpecId, operations, credentialsProvider);
     }
 
-    public BasicAuthenticationProvider(final String openApiSpecId, String name, List<OperationAuthInfo> operations) {
-        this(openApiSpecId, name, operations, new ConfigCredentialsProvider());
-    }
-
     private String getUsername(ClientRequestContext requestContext) {
-        return credentialsProvider.getBasicUsername(requestContext, getOpenApiSpecId(), getName());
+        return getCredentialsProvider().getBasicUsername(requestContext, getOpenApiSpecId(), getName());
     }
 
     private String getPassword(ClientRequestContext requestContext) {
-        return credentialsProvider.getBasicPassword(requestContext, getOpenApiSpecId(), getName());
+        return getCredentialsProvider().getBasicPassword(requestContext, getOpenApiSpecId(), getName());
     }
 
     @Override
@@ -41,7 +37,7 @@ public class BasicAuthenticationProvider extends AbstractAuthProvider {
 
         if (isTokenPropagation()) {
             LOGGER.warn("Token propagation enabled for BasicAuthentication");
-            basicToken = sanitizeBasicToken(getTokenForPropagation(requestContext.getHeaders()));
+            basicToken = sanitizeBasicToken(getTokenForPropagation(requestContext.getHeaders()).orElse(""));
         }
 
         if (!basicToken.isBlank()) {

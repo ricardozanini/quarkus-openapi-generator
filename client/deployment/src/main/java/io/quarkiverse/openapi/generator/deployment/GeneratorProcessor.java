@@ -18,7 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.quarkiverse.openapi.generator.AuthName;
-import io.quarkiverse.openapi.generator.AuthenticationRecorder;
+import io.quarkiverse.openapi.generator.AuthProviderRecorder;
 import io.quarkiverse.openapi.generator.OidcClient;
 import io.quarkiverse.openapi.generator.OpenApiGeneratorConfig;
 import io.quarkiverse.openapi.generator.OpenApiSpec;
@@ -27,16 +27,13 @@ import io.quarkiverse.openapi.generator.markers.BasicAuthenticationMarker;
 import io.quarkiverse.openapi.generator.markers.BearerAuthenticationMarker;
 import io.quarkiverse.openapi.generator.markers.OauthAuthenticationMarker;
 import io.quarkiverse.openapi.generator.markers.OperationMarker;
-import io.quarkiverse.openapi.generator.oidc.ClassicOidcClientRequestFilterDelegate;
-import io.quarkiverse.openapi.generator.oidc.OidcAuthenticationRecorder;
-import io.quarkiverse.openapi.generator.oidc.ReactiveOidcClientRequestFilterDelegate;
 import io.quarkiverse.openapi.generator.oidc.providers.OAuth2AuthenticationProvider;
+import io.quarkiverse.openapi.generator.oidc.providers.OidcAuthenticationRecorder;
 import io.quarkiverse.openapi.generator.providers.ApiKeyIn;
 import io.quarkiverse.openapi.generator.providers.AuthProvider;
 import io.quarkiverse.openapi.generator.providers.BaseCompositeAuthenticationProvider;
 import io.quarkiverse.openapi.generator.providers.CredentialsProvider;
 import io.quarkiverse.openapi.generator.providers.OperationAuthInfo;
-import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.arc.deployment.SyntheticBeanBuildItem;
 import io.quarkus.deployment.Capabilities;
 import io.quarkus.deployment.Capability;
@@ -84,29 +81,8 @@ public class GeneratorProcessor {
     }
 
     @BuildStep
-    void additionalBean(Capabilities capabilities, BuildProducer<AdditionalBeanBuildItem> producer) {
-
-        if (!isClassPresentAtRuntime(ABSTRACT_TOKEN_PRODUCER)) {
-            LOGGER.debug("{} class not found in runtime, skipping OidcClientRequestFilterDelegate bean generation",
-                    ABSTRACT_TOKEN_PRODUCER);
-            return;
-        }
-        LOGGER.debug("{} class found in runtime, producing OidcClientRequestFilterDelegate bean generation",
-                ABSTRACT_TOKEN_PRODUCER);
-
-        if (capabilities.isPresent(Capability.REST_CLIENT_REACTIVE)) {
-            producer.produce(AdditionalBeanBuildItem.builder().addBeanClass(ReactiveOidcClientRequestFilterDelegate.class)
-                    .setDefaultScope(DotName.createSimple(Dependent.class)).setUnremovable().build());
-        } else {
-            producer.produce(AdditionalBeanBuildItem.builder().addBeanClass(ClassicOidcClientRequestFilterDelegate.class)
-                    .setDefaultScope(DotName.createSimple(Dependent.class)).setUnremovable().build());
-        }
-
-    }
-
-    @BuildStep
     @Record(ExecutionTime.STATIC_INIT)
-    void produceCompositeProviders(AuthenticationRecorder recorder, List<AuthProviderBuildItem> authProviders,
+    void produceCompositeProviders(AuthProviderRecorder recorder, List<AuthProviderBuildItem> authProviders,
             BuildProducer<SyntheticBeanBuildItem> beanProducer) {
         Map<String, List<AuthProviderBuildItem>> providersBySpec = authProviders.stream()
                 .collect(Collectors.groupingBy(AuthProviderBuildItem::getOpenApiSpecId));
@@ -127,6 +103,41 @@ public class GeneratorProcessor {
 
     @BuildStep
     @Record(ExecutionTime.STATIC_INIT)
+    void registerOidcDelegates(
+            CombinedIndexBuildItem index,
+            Capabilities caps,
+            BuildProducer<SyntheticBeanBuildItem> beans,
+            OidcAuthenticationRecorder oidcRecorder) {
+
+        if (!isClassPresentAtRuntime(ABSTRACT_TOKEN_PRODUCER)) {
+            LOGGER.debug("OIDC not on classpath, skipping delegate registration");
+            return;
+        }
+        boolean reactive = caps.isPresent(Capability.REST_CLIENT_REACTIVE);
+
+        // group markers by flow name
+        Map<String, List<AnnotationInstance>> byFlow = index.getIndex()
+                .getAnnotationsWithRepeatable(OAUTH_AUTHENTICATION_MARKER, index.getIndex())
+                .stream()
+                .collect(Collectors.groupingBy(m -> m.value("name").asString()));
+
+        for (String flowName : byFlow.keySet()) {
+            beans.produce(SyntheticBeanBuildItem.configure(
+                    OAuth2AuthenticationProvider.OidcClientRequestFilterDelegate.class)
+                    .scope(Dependent.class)
+                    .addQualifier()
+                    .annotation(OidcClient.class)
+                    .addValue("name", flowName)
+                    .done()
+                    // <— here we hand Quarkus a recorder‐generated supplier/proxy
+                    .supplier(oidcRecorder.recordOidcClient(flowName, reactive))
+                    .unremovable()
+                    .done());
+        }
+    }
+
+    @BuildStep
+    @Record(ExecutionTime.RUNTIME_INIT)
     void produceOauthAuthentication(CombinedIndexBuildItem beanArchiveBuildItem,
             BuildProducer<AuthProviderBuildItem> authenticationProviders,
             BuildProducer<SyntheticBeanBuildItem> beanProducer,
@@ -176,19 +187,18 @@ public class GeneratorProcessor {
                     .annotation(OpenApiSpec.class)
                     .addValue("openApiSpecId", openApiSpecId)
                     .done()
-                    .addInjectionPoint(ClassType.create(OAuth2AuthenticationProvider.OidcClientRequestFilterDelegate.class),
-                            AnnotationInstance.builder(OidcClient.class).add("name", sanitizeAuthName(name)).build())
-                    .createWith(oidcRecorder.recordOauthAuthProvider(sanitizeAuthName(name), openApiSpecId, operations))
+                    .setRuntimeInit()
+                    .runtimeValue(oidcRecorder.recordOauthAuthProvider(sanitizeAuthName(name), openApiSpecId, operations))
                     .unremovable()
                     .done());
         }
     }
 
     @BuildStep
-    @Record(ExecutionTime.STATIC_INIT)
+    @Record(ExecutionTime.RUNTIME_INIT)
     void produceBasicAuthentication(CombinedIndexBuildItem beanArchiveBuildItem,
             BuildProducer<AuthProviderBuildItem> authenticationProviders, BuildProducer<SyntheticBeanBuildItem> beanProducer,
-            AuthenticationRecorder recorder) {
+            AuthProviderRecorder recorder) {
 
         Collection<AnnotationInstance> authenticationMarkers = beanArchiveBuildItem.getIndex()
                 .getAnnotationsWithRepeatable(BASIC_AUTHENTICATION_MARKER, beanArchiveBuildItem.getIndex())
@@ -216,18 +226,18 @@ public class GeneratorProcessor {
                     .annotation(OpenApiSpec.class)
                     .addValue("openApiSpecId", openApiSpecId)
                     .done()
-                    .addInjectionPoint(ClassType.create(DotName.createSimple(CredentialsProvider.class)))
-                    .createWith(recorder.recordBasicAuthProvider(sanitizeAuthName(name), openApiSpecId, operations))
+                    .setRuntimeInit()
+                    .runtimeValue(recorder.recordBasicAuthProvider(sanitizeAuthName(name), openApiSpecId, operations))
                     .unremovable()
                     .done());
         }
     }
 
     @BuildStep
-    @Record(ExecutionTime.STATIC_INIT)
+    @Record(ExecutionTime.RUNTIME_INIT)
     void produceBearerAuthentication(CombinedIndexBuildItem beanArchiveBuildItem,
             BuildProducer<AuthProviderBuildItem> authenticationProviders, BuildProducer<SyntheticBeanBuildItem> beanProducer,
-            AuthenticationRecorder recorder) {
+            AuthProviderRecorder recorder) {
 
         Collection<AnnotationInstance> authenticationMarkers = beanArchiveBuildItem.getIndex()
                 .getAnnotationsWithRepeatable(BEARER_AUTHENTICATION_MARKER, beanArchiveBuildItem.getIndex())
@@ -257,7 +267,8 @@ public class GeneratorProcessor {
                     .addValue("openApiSpecId", openApiSpecId)
                     .done()
                     .addInjectionPoint(ClassType.create(DotName.createSimple(CredentialsProvider.class)))
-                    .createWith(recorder.recordBearerAuthProvider(sanitizeAuthName(name), scheme, openApiSpecId, operations))
+                    .setRuntimeInit()
+                    .runtimeValue(recorder.recordBearerAuthProvider(sanitizeAuthName(name), scheme, openApiSpecId, operations))
                     .unremovable()
                     .done());
 
@@ -265,10 +276,10 @@ public class GeneratorProcessor {
     }
 
     @BuildStep
-    @Record(ExecutionTime.STATIC_INIT)
+    @Record(ExecutionTime.RUNTIME_INIT)
     void produceApiKeyAuthentication(CombinedIndexBuildItem beanArchiveBuildItem,
             BuildProducer<AuthProviderBuildItem> authenticationProviders, BuildProducer<SyntheticBeanBuildItem> beanProducer,
-            AuthenticationRecorder recorder) {
+            AuthProviderRecorder recorder) {
 
         Collection<AnnotationInstance> authenticationMarkers = beanArchiveBuildItem.getIndex()
                 .getAnnotationsWithRepeatable(API_KEY_AUTHENTICATION_MARKER, beanArchiveBuildItem.getIndex())
@@ -299,8 +310,8 @@ public class GeneratorProcessor {
                     .annotation(OpenApiSpec.class)
                     .addValue("openApiSpecId", openApiSpecId)
                     .done()
-                    .addInjectionPoint(ClassType.create(DotName.createSimple(CredentialsProvider.class)))
-                    .createWith(recorder.recordApiKeyAuthProvider(sanitizeAuthName(name), openApiSpecId, apiKeyIn, apiKeyName,
+                    .setRuntimeInit()
+                    .runtimeValue(recorder.recordApiKeyAuthProvider(sanitizeAuthName(name), openApiSpecId, apiKeyIn, apiKeyName,
                             operations))
                     .unremovable()
                     .done());

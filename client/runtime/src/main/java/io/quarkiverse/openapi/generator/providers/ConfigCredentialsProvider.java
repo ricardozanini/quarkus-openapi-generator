@@ -9,9 +9,12 @@ import org.eclipse.microprofile.config.ConfigProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.quarkus.arc.Unremovable;
+
 @Dependent
 @Alternative
 @Priority(100)
+@Unremovable
 public class ConfigCredentialsProvider implements CredentialsProvider {
 
     static final String USER_NAME = "username";

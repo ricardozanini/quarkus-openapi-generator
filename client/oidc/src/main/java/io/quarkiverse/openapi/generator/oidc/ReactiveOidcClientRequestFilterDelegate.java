@@ -3,7 +3,6 @@ package io.quarkiverse.openapi.generator.oidc;
 import java.io.IOException;
 
 import jakarta.annotation.Priority;
-import jakarta.enterprise.inject.spi.InjectionPoint;
 import jakarta.ws.rs.Priorities;
 import jakarta.ws.rs.client.ClientRequestContext;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -13,7 +12,6 @@ import org.jboss.resteasy.reactive.client.spi.ResteasyReactiveClientRequestConte
 import org.jboss.resteasy.reactive.client.spi.ResteasyReactiveClientRequestFilter;
 
 import io.quarkiverse.openapi.generator.OidcClient;
-import io.quarkiverse.openapi.generator.OpenApiGeneratorConfig;
 import io.quarkiverse.openapi.generator.oidc.providers.OAuth2AuthenticationProvider;
 import io.quarkus.oidc.client.runtime.AbstractTokensProducer;
 import io.quarkus.oidc.client.runtime.DisabledOidcClientException;
@@ -29,10 +27,8 @@ public class ReactiveOidcClientRequestFilterDelegate extends AbstractTokensProdu
 
     final String clientId;
 
-    ReactiveOidcClientRequestFilterDelegate(InjectionPoint injectionPoint) {
-        OidcClient annotation = (OidcClient) injectionPoint.getQualifiers().stream()
-                .filter(x -> x.annotationType().equals(OidcClient.class)).findFirst().orElseThrow();
-        this.clientId = OpenApiGeneratorConfig.getSanitizedSecuritySchemeName(annotation.name());
+    public ReactiveOidcClientRequestFilterDelegate(final String clientId) {
+        this.clientId = clientId;
     }
 
     @Override

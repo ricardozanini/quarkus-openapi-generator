@@ -3,7 +3,6 @@ package io.quarkiverse.openapi.generator.oidc;
 import java.io.IOException;
 
 import jakarta.annotation.Priority;
-import jakarta.enterprise.inject.spi.InjectionPoint;
 import jakarta.ws.rs.Priorities;
 import jakarta.ws.rs.client.ClientRequestContext;
 import jakarta.ws.rs.client.ClientRequestFilter;
@@ -11,7 +10,6 @@ import jakarta.ws.rs.client.ClientRequestFilter;
 import org.jboss.logging.Logger;
 
 import io.quarkiverse.openapi.generator.OidcClient;
-import io.quarkiverse.openapi.generator.OpenApiGeneratorConfig;
 import io.quarkiverse.openapi.generator.oidc.providers.OAuth2AuthenticationProvider;
 import io.quarkus.oidc.client.runtime.AbstractTokensProducer;
 import io.quarkus.oidc.client.runtime.DisabledOidcClientException;
@@ -25,11 +23,8 @@ public class ClassicOidcClientRequestFilterDelegate extends AbstractTokensProduc
 
     final String clientId;
 
-    ClassicOidcClientRequestFilterDelegate(InjectionPoint injectionPoint) {
-        OidcClient annotation = (OidcClient) injectionPoint.getQualifiers().stream()
-                .filter(x -> x.annotationType().equals(OidcClient.class)).findFirst().orElseThrow();
-
-        this.clientId = OpenApiGeneratorConfig.getSanitizedSecuritySchemeName(annotation.name());
+    public ClassicOidcClientRequestFilterDelegate(final String clientId) {
+        this.clientId = clientId;
     }
 
     @Override

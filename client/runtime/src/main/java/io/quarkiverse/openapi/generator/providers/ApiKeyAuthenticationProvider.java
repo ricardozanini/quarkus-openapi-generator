@@ -24,7 +24,7 @@ public class ApiKeyAuthenticationProvider extends AbstractAuthProvider {
     private final String apiKeyName;
 
     public ApiKeyAuthenticationProvider(final String openApiSpecId, final String name, final ApiKeyIn apiKeyIn,
-            final String apiKeyName, List<OperationAuthInfo> operations, CredentialsProvider credentialsProvider) {
+            final String apiKeyName, List<OperationAuthInfo> operations, final CredentialsProvider credentialsProvider) {
         super(name, openApiSpecId, operations, credentialsProvider);
         this.apiKeyIn = apiKeyIn;
         this.apiKeyName = apiKeyName;
@@ -59,7 +59,7 @@ public class ApiKeyAuthenticationProvider extends AbstractAuthProvider {
     }
 
     private String getApiKey(ClientRequestContext requestContext) {
-        return credentialsProvider.getApiKey(requestContext, getOpenApiSpecId(), getName());
+        return getCredentialsProvider().getApiKey(requestContext, getOpenApiSpecId(), getName());
     }
 
     private boolean isUseAuthorizationHeaderValue() {

@@ -5,7 +5,7 @@ import static io.quarkiverse.openapi.generator.providers.AbstractAuthenticationP
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
+import java.util.Optional;
 
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MultivaluedMap;
@@ -16,17 +16,13 @@ import io.quarkiverse.openapi.generator.AuthConfig;
 
 public abstract class AbstractAuthProvider implements AuthProvider {
 
-    CredentialsProvider credentialsProvider;
-
-    private static final String BEARER_WITH_SPACE = "Bearer ";
-    private static final String BASIC_WITH_SPACE = "Basic ";
-
-    private static final String CANONICAL_AUTH_CONFIG_PROPERTY_NAME = "quarkus." + RUNTIME_TIME_CONFIG_PREFIX
-            + ".%s.auth.%s.%s";
-
+    private static final String BEARER_PREFIX = "Bearer ";
+    private static final String BASIC_PREFIX = "Basic ";
+    private static final String CONFIG_PATTERN = "quarkus." + RUNTIME_TIME_CONFIG_PREFIX + ".%s.auth.%s.%s";
     private final String openApiSpecId;
     private final String name;
     private final List<OperationAuthInfo> applyToOperations = new ArrayList<>();
+    private final CredentialsProvider credentialsProvider;
 
     protected AbstractAuthProvider(String name, String openApiSpecId, List<OperationAuthInfo> operations,
             CredentialsProvider credentialsProvider) {
@@ -36,22 +32,33 @@ public abstract class AbstractAuthProvider implements AuthProvider {
         this.credentialsProvider = credentialsProvider;
     }
 
-    protected static String sanitizeBearerToken(String token) {
-        if (token != null && token.toLowerCase().startsWith(BEARER_WITH_SPACE.toLowerCase())) {
-            return token.substring(BEARER_WITH_SPACE.length());
+    /**
+     * Strip the given prefix (case-insensitive) from the start of the token.
+     */
+    protected static String stripPrefix(String token, String prefix) {
+        if (token != null && token.regionMatches(true, 0, prefix, 0, prefix.length())) {
+            return token.substring(prefix.length());
         }
         return token;
+    }
+
+    protected static String sanitizeBearerToken(String token) {
+        return stripPrefix(token, BEARER_PREFIX);
     }
 
     protected static String sanitizeBasicToken(String token) {
-        if (token != null && token.toLowerCase().startsWith(BASIC_WITH_SPACE.toLowerCase())) {
-            return token.substring(BASIC_WITH_SPACE.length());
-        }
-        return token;
+        return stripPrefix(token, BASIC_PREFIX);
     }
 
-    public String getOpenApiSpecId() {
-        return openApiSpecId;
+    /**
+     * Static form for building canonical config keys.
+     */
+    public static String getCanonicalAuthConfigPropertyName(String authPropertyName, String openApiSpecId, String authName) {
+        return String.format(CONFIG_PATTERN, openApiSpecId, authName, authPropertyName);
+    }
+
+    protected final CredentialsProvider getCredentialsProvider() {
+        return credentialsProvider;
     }
 
     @Override
@@ -59,21 +66,8 @@ public abstract class AbstractAuthProvider implements AuthProvider {
         return name;
     }
 
-    public boolean isTokenPropagation() {
-        return ConfigProvider.getConfig()
-                .getOptionalValue(getCanonicalAuthConfigPropertyName(AuthConfig.TOKEN_PROPAGATION), Boolean.class)
-                .orElse(false);
-    }
-
-    public String getTokenForPropagation(MultivaluedMap<String, Object> httpHeaders) {
-        String headerName = getHeaderName() != null ? getHeaderName() : HttpHeaders.AUTHORIZATION;
-        String propagatedHeaderName = propagationHeaderName(getOpenApiSpecId(), getName(), headerName);
-        return Objects.toString(httpHeaders.getFirst(propagatedHeaderName));
-    }
-
-    public String getHeaderName() {
-        return ConfigProvider.getConfig()
-                .getOptionalValue(getCanonicalAuthConfigPropertyName(AuthConfig.HEADER_NAME), String.class).orElse(null);
+    public String getOpenApiSpecId() {
+        return openApiSpecId;
     }
 
     @Override
@@ -81,11 +75,33 @@ public abstract class AbstractAuthProvider implements AuthProvider {
         return applyToOperations;
     }
 
-    public final String getCanonicalAuthConfigPropertyName(String authPropertyName) {
-        return getCanonicalAuthConfigPropertyName(authPropertyName, getOpenApiSpecId(), getName());
+    /**
+     * Should the original request's authorization header be propagated?
+     */
+    public boolean isTokenPropagation() {
+        return ConfigProvider.getConfig()
+                .getOptionalValue(getCanonicalAuthConfigPropertyName(AuthConfig.TOKEN_PROPAGATION), Boolean.class)
+                .orElse(false);
     }
 
-    public static String getCanonicalAuthConfigPropertyName(String authPropertyName, String openApiSpecId, String authName) {
-        return String.format(CANONICAL_AUTH_CONFIG_PROPERTY_NAME, openApiSpecId, authName, authPropertyName);
+    /**
+     * If propagation is enabled, returns the header value that was forwarded during propagation.
+     */
+    public Optional<String> getTokenForPropagation(MultivaluedMap<String, Object> httpHeaders) {
+        String headerName = Optional.ofNullable(getHeaderName()).orElse(HttpHeaders.AUTHORIZATION);
+        return Optional.ofNullable(httpHeaders.getFirst(propagationHeaderName(openApiSpecId, name, headerName)))
+                .map(Object::toString);
+    }
+
+    public String getHeaderName() {
+        return ConfigProvider.getConfig()
+                .getOptionalValue(getCanonicalAuthConfigPropertyName(AuthConfig.HEADER_NAME), String.class).orElse(null);
+    }
+
+    /**
+     * Builds the canonical config key for this auth provider and property.
+     */
+    public final String getCanonicalAuthConfigPropertyName(String authPropertyName) {
+        return String.format(CONFIG_PATTERN, openApiSpecId, name, authPropertyName);
     }
 }

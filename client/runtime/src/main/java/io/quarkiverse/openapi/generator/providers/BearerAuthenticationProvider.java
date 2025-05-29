@@ -21,17 +21,12 @@ public class BearerAuthenticationProvider extends AbstractAuthProvider {
         this.scheme = scheme;
     }
 
-    public BearerAuthenticationProvider(final String openApiSpecId, final String name, final String scheme,
-            List<OperationAuthInfo> operations) {
-        this(openApiSpecId, name, scheme, operations, new ConfigCredentialsProvider());
-    }
-
     @Override
     public void filter(ClientRequestContext requestContext) throws IOException {
         String bearerToken = getBearerToken(requestContext);
 
         if (isTokenPropagation()) {
-            bearerToken = sanitizeBearerToken(getTokenForPropagation(requestContext.getHeaders()));
+            bearerToken = sanitizeBearerToken(getTokenForPropagation(requestContext.getHeaders()).orElse(""));
         }
 
         if (!bearerToken.isBlank()) {
@@ -40,6 +35,6 @@ public class BearerAuthenticationProvider extends AbstractAuthProvider {
     }
 
     private String getBearerToken(ClientRequestContext requestContext) {
-        return credentialsProvider.getBearerToken(requestContext, getOpenApiSpecId(), getName());
+        return getCredentialsProvider().getBearerToken(requestContext, getOpenApiSpecId(), getName());
     }
 }
